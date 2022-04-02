@@ -5,16 +5,137 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <stdio.h>
+#include <pthread.h>
 
+
+int contador;
+
+//accesso exluyente
+pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+
+
+void *AtenderCliente(void *socket)
+{
+	int sock_conn;
+	int *s;
+	s = (int *) socket;
+	sock_conn = *s;
+	
+	char peticion[512];
+	char respuesta[512];
+	int ret;
+	
+	int terminar = 0;
+	
+	// Entramos en un bucle para atender todas las peticiones de este cliente
+	//hasta que se desconecte
+	
+	while (terminar ==0)
+	{
+		// Ahora recibimos la petici?n
+		ret = read(sock_conn,peticion, sizeof(peticion));
+		printf ("Recibido\n");
+		
+		// Tenemos que a?adirle la marca de fin de string 
+		// para que no escriba lo que hay despues en el buffer
+		peticion[ret]='\0';
+		
+		
+		printf ("Peticion: %s\n",peticion);
+		
+		// vamos a ver que quieren
+		char *p = strtok( peticion, "/");
+		int codigo =  atoi (p);
+		// Ya tenemos el c?digo de la petici?n
+		char nombre[20];
+		
+		if ((codigo !=0)&&(codigo!=4))
+		{
+			p = strtok( NULL, "/");
+			
+			strcpy (nombre, p);
+			// Ya tenemos el nombre
+			printf ("Codigo: %d, Nombre: %s\n", codigo, nombre);
+		}
+		if (codigo ==0) //petici?n de desconexi?n
+			terminar=1;
+	    else if (codigo == 4)
+			sprintf(respuesta,"%d",contador);
+		else if (codigo == 1) //piden la longitud del nombre
+			sprintf (respuesta,"%d",strlen (nombre));
+		else if (codigo == 2) //quieren saber si el nombre es bonito
+		{
+			if((nombre[0]=='M') || (nombre[0]=='S'))
+				strcpy (respuesta,"SI");
+			else
+				strcpy (respuesta,"NO");
+		}
+		else if(codigo == 3) //quiere saber si es alto
+		{
+			p = strtok( NULL, "/");
+			float altura =  atof (p);
+			if (altura > 1.70)
+			sprintf (respuesta, "%s: eres alto",nombre);
+		    else
+			sprintf (respuesta, "%s: eres bajo",nombre);
+		}
+		else if (codigo == 5) //Devuelveme mi nombre en mayusuculas
+		{
+			char ch;
+			int i = 0;
+			while((ch = nombre[i]) != '\0')
+			{
+				if((ch >= 97) && (ch <= 122))
+				{
+					sprintf (respuesta,"%c",ch-32);
+				}
+				else
+				{
+					sprintf(respuesta, "%c",ch);
+				}
+				i++;
+			}
+		}
+		else if (codigo == 6) //Dime si mi nombre es palíndromo   AQUI PODRIA UTILITZAR LA FUNCTION STRREV PERO NO ME DEJA POR EL COMPLIADOR QUE UTILIZAMOS
+		{
+			int flag = 0;
+			for(int i = 0; i < strlen(nombre); i++)
+			{
+				if(nombre[i] != nombre[strlen(nombre) - i - 1])
+				{
+					flag = 1;
+				}
+				break;
+			}
+			if(flag)
+				sprintf(respuesta,"%s NO es un nombre palindromo",nombre);
+			else
+				sprintf(respuesta,"%s SI es un nombre palindromo",nombre);
+		}
+		if (codigo != 0)
+		{
+			printf ("Respuesta: %s\n", respuesta);
+			write (sock_conn,respuesta,strlen(respuesta));
+		}
+		if ((codigo == 1) || (codigo == 2) || (codigo == 3) || (codigo == 5) || (codigo == 6))
+		{
+			pthread_mutex_lock(&mutex);
+			contador = contador+1;
+			pthread_mutex_unlock(&mutex);
+		}
+	}
+	
+    // Se acabo el servicio para este cliente
+	close(sock_conn); 	
+}
 
 
 int main(int argc, char *argv[])
 {
 	
-	int sock_conn, sock_listen, ret;
+	int sock_conn, sock_listen;
 	struct sockaddr_in serv_adr;
-	char peticion[512];
-	char respuesta[512];
+	
 	// INICIALITZACIONS
 	// Obrim el socket
 	if ((sock_listen = socket(AF_INET, SOCK_STREAM, 0)) < 0)
@@ -36,93 +157,24 @@ int main(int argc, char *argv[])
 	if (listen(sock_listen, 3) < 0)
 		printf("Error en el Listen");
 	
+	contador =0;
 	int i;
-	// bucle infinito
+	int sockets[100];
+	pthread_t thread;
+	i=0;
+	// Bucle para atender a 5 clientes
 	for (;;){
 		printf ("Escuchando\n");
 		
 		sock_conn = accept(sock_listen, NULL, NULL);
 		printf ("He recibido conexion\n");
+		
+		sockets[i] =sock_conn;
 		//sock_conn es el socket que usaremos para este cliente
 		
-		// Ahora recibimos la petici?n
-		ret=read(sock_conn,peticion, sizeof(peticion));
-		printf ("Recibido\n");
+		// Crear thead y decirle lo que tiene que hacer
 		
-		// Tenemos que a?adirle la marca de fin de string 
-		// para que no escriba lo que hay despues en el buffer
-		peticion[ret]='\0';
-		
-
-		
-		printf ("Peticion: %s\n",peticion);
-		
-		// vamos a ver que quieren
-		char *p = strtok( peticion, "/");
-		int codigo =  atoi (p);
-		// Ya tenemos el c?digo de petici?n
-		p = strtok( NULL, "/");
-		char nombre[20];
-		strcpy (nombre, p);
-		//Ya tenemos el nombre
-		printf ("Codigo: %d, Nombre: %s\n", codigo, nombre);
-		
-		if (codigo ==1) //piden la longitd del nombre
-			sprintf (respuesta,"%d",strlen (nombre));
-		else if (codigo ==2) // quieren saber si el nombre es bonito
-		{
-			if((nombre[0]=='M') || (nombre[0]=='S'))
-				strcpy (respuesta,"SI");
-			else
-				strcpy (respuesta,"NO");
-		}
-		else if(codigo == 3) //quiere saber si es alto
-		{
-			p = strtok( NULL, "/");
-			float altura =  atof (p);
-			if (altura > 1.70)
-			sprintf (respuesta, "%s: eres alto",nombre);
-		    else
-			sprintf (respuesta, "%s: eres bajo",nombre);
-		}
-		else if (codigo == 4) //Devuelveme mi nombre en mayusuculas
-		{
-			char ch;
-			int i = 0;
-			while((ch = nombre[i]) != '\0')
-			{
-				if((ch >= 97) && (ch <= 122))
-				{
-					sprintf (respuesta,"%c",ch-32);
-				}
-				else
-				{
-					sprintf(respuesta, "%c",ch);
-				}
-				i++;
-			}
-		}
-		else if (codigo == 5) //Dime si mi nombre es palíndromo   AQUI PODRIA UTILITZAR LA FUNCTION STRREV PERO NO ME DEJA POR EL COMPLIADOR QUE UTILIZAMOS
-		{
-			int flag = 0;
-			for(int i = 0; i < strlen(nombre); i++)
-			{
-				if(nombre[i] != nombre[strlen(nombre) - i - 1])
-				{
-					flag = 1;
-				}
-				break;
-			}
-			if(flag)
-				sprintf(respuesta,"%s NO es un nombre palindromo",nombre);
-			else
-				sprintf(respuesta,"%s SI es un nombre palindromo",nombre);
-		}
-			printf ("Respuesta: %s\n", respuesta);
-			// Enviamos la respuesta
-			write (sock_conn,respuesta, strlen(respuesta));
-			
-			// Se acabo el servicio para este cliente
-			close(sock_conn); 
+		pthread_create (&thread, NULL, AtenderCliente,&sockets[i]);
+		i=i+1;
 	}
 }
